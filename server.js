@@ -1,55 +1,32 @@
 import express from 'express';
 import cors from 'cors';
-import pdf from 'pdf-parse';
 import fs from 'fs';
+import { extractInvoiceData } from './invoice_reader.js';
 
 const app = express();
-
-// ✅ Enable CORS for all origins (default)
 app.use(cors());
 
-// OR, if you want to restrict access to specific origins, use this instead:
-// app.use(cors({
-//   origin: ['https://your-frontend-domain.com', 'http://localhost:3000'],
-//   methods: ['GET', 'POST'],
-//   allowedHeaders: ['Content-Type', 'Authorization']
-// }));
+// ✅ Increase payload limit to handle Base64-encoded PDFs
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.get('/', (req, res) => res.send('🚀 Node OCR API is running!'));
 
-// Health check route
-app.get('/', (req, res) => {
-  res.send('🚀 Node OCR API is running!');
-});
-
-// Main parsing route
 app.post('/parse', async (req, res) => {
   try {
-    console.log('📄 Received parse request');
-    const { filePath } = req.body;
-    if (!filePath) {
-      return res.status(400).json({ success: false, error: 'Missing filePath' });
-    }
+    const { fileData, fileName } = req.body;
+    if (!fileData || !fileName)
+      return res.status(400).json({ success: false, error: 'Missing fileData or fileName' });
 
-    const dataBuffer = fs.readFileSync(filePath);
-    const data = await pdf(dataBuffer);
-    const text = data.text.replace(/\r/g, '').replace(/\s+/g, ' ').trim();
+    const tempPath = `./temp_${Date.now()}_${fileName}`;
+    fs.writeFileSync(tempPath, Buffer.from(fileData, 'base64'));
 
-    const getMatch = (regex) => {
-      const match = text.match(regex);
-      return match ? match[1].trim() : null;
-    };
-
-    const invoiceData = {
-      customerName: getMatch(/CUSTOMER\s*NAME\s*[:\-]?\s*(.+?)(?=\s+DUE\s+DATE|TIN|ADDRESS|$)/i),
-      dueDate: getMatch(/DUE\s*DATE\s*[:\-]?\s*([0-9/.\-]+)/i),
-      accountNo: getMatch(/AC\s*NO\.?\s*[:\-]?\s*([0-9\-]+)/i),
-    };
+    const invoiceData = await extractInvoiceData(tempPath);
+    fs.unlinkSync(tempPath);
 
     res.json({ success: true, invoiceData });
   } catch (err) {
-    console.error(err);
+    console.error('❌ Parse Error:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
