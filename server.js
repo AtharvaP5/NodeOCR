@@ -5,10 +5,14 @@ import { extractInvoiceData } from './invoice_reader.js';
 
 const app = express();
 app.use(cors());
-
-// ✅ Increase payload limit to handle Base64-encoded PDFs
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// ✅ Log every incoming request (method, path, IP, and timestamp)
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url} from ${req.ip}`);
+  next();
+});
 
 app.get('/', (req, res) => res.send('🚀 Node OCR API is running!'));
 
@@ -18,12 +22,16 @@ app.post('/parse', async (req, res) => {
     if (!fileData || !fileName)
       return res.status(400).json({ success: false, error: 'Missing fileData or fileName' });
 
+    // ✅ Log file details
+    console.log(`📦 Received file: ${fileName}, size: ${fileData.length} bytes`);
+
     const tempPath = `./temp_${Date.now()}_${fileName}`;
     fs.writeFileSync(tempPath, Buffer.from(fileData, 'base64'));
 
     const invoiceData = await extractInvoiceData(tempPath);
     fs.unlinkSync(tempPath);
 
+    console.log(`✅ Successfully processed invoice: ${fileName}`);
     res.json({ success: true, invoiceData });
   } catch (err) {
     console.error('❌ Parse Error:', err);
